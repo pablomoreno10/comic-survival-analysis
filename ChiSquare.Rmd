@@ -1,0 +1,181 @@
+---
+title: "chiSquare-Class"
+output: html_document
+date: "2023-11-05"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Chi Square Test
+
+Start by defining some colours. 
+
+```{r}
+colours <- c("#FF9580","#F2FAA6", "#B8B3EA")
+```
+
+### Load in the data
+
+Use the function `read.csv` to load the in the comic book data set. Update to the correct directory structure. 
+
+```{r}
+comicData <- read.csv("/users/Pablo/downloads/comic_characters.csv")
+```
+
+Look at the variables available to you in the data set. 
+
+```{r}
+str(comicData)
+```
+#Research Question?
+
+Is there a relationship between a comic book character's identity and whether they are alive or dead?
+
+#Null Hypothesis (H₀):
+
+There is no association between a character's identity and their alive status.
+
+#Alternative Hypothesis (H₁): 
+
+There is an association between a character's identity and their alive status.
+
+
+getExpectedTable calculates the expected values from the frequency table returned by `table`. This function should work for any comparison you make (you could use any two categorical variables)
+
+```{r}
+getExpectedTable <- function(f){
+  rowTotal <- apply(f, 1, sum)
+  columTotal <- apply(f, 2, sum)
+  tableTotal <- sum(f)
+  
+  # Matrix multiplication in R
+  Expected <- (rowTotal %*% t(columTotal))/tableTotal
+  return(Expected)
+}
+```
+
+```{r}
+xFreq <- table(comicData$Alive, comicData$Identity)
+xFreq
+```
+
+- 'Secret' and 'Public' variables have the most observations.
+- The variables 'Unknown' and 'Known to Authorities' have significantly less observations than the others.
+
+```{r}
+expected <- getExpectedTable(xFreq)
+expected
+```
+```{r}
+chiSqP <- sum((((xFreq - expected)**2)) / expected)
+chiSqP
+```
+
+```{r}
+p <- pchisq(chiSqP, df = 4, lower.tail = FALSE)
+p
+```
+
+```{r}
+p > 0.05
+```
+#Now, let's perform permutation test.
+
+getShuffleCounts is a function to return a new shuffled frequency table to compare with the expected table in the resampling procedure to determine significance level. This function was designed for the Alignment and Alive comparison and will need to be adjusted for other variables / comparisons. 
+
+```{r}
+getShuffledCounts <- function(columTotal, rowTotal, tableTotal) {
+  AandB <- c(rep(1, columTotal[1]), rep(0, columTotal[2])) 
+  
+  nA <- rowTotal[1]  
+  nB <- rowTotal[2]  
+  nC <- rowTotal[3]  
+  nD <- rowTotal[4] 
+  nE <- rowTotal[5] 
+  
+  N <- tableTotal
+  
+  chiSquareP <-NULL 
+  
+  idxA <- sample(1:N, nA, replace = FALSE)
+  remaining <- setdiff(1:N, idxA)
+  idxB <- sample(remaining, nB, replace = FALSE)
+  remaining <- setdiff(remaining, idxB)
+  idxC <- sample(remaining, nC, replace = FALSE)
+  remaining <- setdiff(remaining, idxC)
+  idxD <- sample(remaining, nD, replace = FALSE)
+  idxE <- setdiff(remaining, idxD) 
+  
+  knownAuth <- c(sum(AandB[idxA]), nA - sum(AandB[idxA]))
+  nonDual   <- c(sum(AandB[idxB]), nB - sum(AandB[idxB]))
+  public    <- c(sum(AandB[idxC]), nC - sum(AandB[idxC]))
+  secret    <- c(sum(AandB[idxD]), nD - sum(AandB[idxD]))
+  unknown   <- c(sum(AandB[idxE]), nE - sum(AandB[idxE]))
+  
+  # Combine into matrix
+  theMatrix <- rbind(knownAuth, nonDual, public, secret, unknown)
+  colnames(theMatrix) <- c("Dead", "Alive")
+  rownames(theMatrix) <- names(rowTotal)
+  
+  return(theMatrix)
+}
+```
+
+```{r}
+set.seed(123)
+chiTemp <- NULL
+for (i in 1:2000){
+  theMatrix <- getShuffledCounts(columTotal = rowSums(xFreq), rowTotal = colSums(xFreq), tableTotal = sum(xFreq))
+  chiTemp[i] <- sum((t(theMatrix) - expected) ** 2 / expected)
+}
+```
+
+```{r}
+permutP <- mean(chiTemp > chiSqP)
+permutP
+```
+#Let's visualize our Chi Square Distribution.
+
+```{r}
+# Set colors
+colors <- c("#2E86AB", "#FF6B6B", "#4ECDC4", "#292F36")
+
+hist(chiTemp,
+     breaks = 30,
+     freq = FALSE,
+     col = adjustcolor(colors[1], alpha.f = 0.6),
+     border = "white",
+     main = "",  # Removed title
+     xlab = "Chi-Square Statistic",
+     ylab = "Density",
+     xlim = c(0, max(chiTemp) + 5),
+     ylim = c(0, 0.2))
+
+curve(dchisq(x, df = 4), col = colors[2], lwd = 3, add = TRUE)  # Chi-square curve
+abline(v = qchisq(0.95, df = 4), col = colors[4], lwd = 2, lty = 3)  # Critical line
+abline(v = chiSqP, col = colors[3], lwd = 3, lty = 2)  # Observed stat
+
+legend("topright",
+       legend = c("Permutation Null", 
+                  "Chi-Square (df=4)", 
+                  paste("Observed =", round(chiSqP, 2)), 
+                  paste("Critical =", round(qchisq(0.95, df=4), 2))),
+       fill = c(adjustcolor(colors[1], alpha.f=0.6), NA, NA, NA),
+       border = c("white", NA, NA, NA),
+       lty = c(NA, 1, 2, 3),
+       col = c(NA, colors[2], colors[3], colors[4]),
+       lwd = c(NA, 3, 3, 2),
+       bty = "n",
+       cex = 0.9)
+
+polygon(c(qchisq(0.95, df=4), seq(qchisq(0.95, df=4), 25, length=100), 25),
+        c(0, dchisq(seq(qchisq(0.95, df=4), 25, length=100), df=4), 0),
+        col=adjustcolor(colors[2], alpha.f=0.1), border=NA)
+```
+
+#Conclusion
+The permutation test gives a p-value of 0.022 (< 0.05), so we reject the null hypothesis.
+There is statistically significant evidence that a comic character’s identity status is linked to their survival (Alive/Dead).
+The data supports the alternative hypothesis: identity and survival are associated.
